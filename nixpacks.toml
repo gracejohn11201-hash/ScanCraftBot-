@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["python311", "zbar", "libzbar", "gcc", "libpng", "zlib", "opencv", "cmake", "glibc"]
+nixPkgs = ["python311", "zbar", "libzbar", "gcc", "libpng", "zlib"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt"]
