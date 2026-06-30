@@ -2,18 +2,24 @@ import os
 import io
 import re
 import json
+import sys
 from datetime import datetime
 from PIL import Image
 import qrcode
 
-# Try to import pyzbar with fallback
+# ==================== CHECK PYZBAR AVAILABILITY ====================
+PYZBAR_AVAILABLE = False
 try:
     from pyzbar.pyzbar import decode
     PYZBAR_AVAILABLE = True
-except ImportError:
-    PYZBAR_AVAILABLE = False
-    print("⚠️ pyzbar not available - QR scanning disabled")
+    print("✅ pyzbar loaded successfully")
+except ImportError as e:
+    print(f"❌ pyzbar import error: {e}")
+    print("⚠️ QR scanning will be disabled")
+except Exception as e:
+    print(f"❌ Unexpected error loading pyzbar: {e}")
 
+# Import telegram libraries
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -69,7 +75,7 @@ def scan_qr_code(image_data: bytes):
             data = obj.data.decode('utf-8')
             results.append({
                 "data": data,
-                "type": obj.type,
+                "type": str(obj.type),
                 "rect": {
                     "left": obj.rect.left,
                     "top": obj.rect.top,
@@ -191,7 +197,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         scan_history[user_id] = []
     
     # Check if scanning is available
-    scan_status = "✅ Available" if PYZBAR_AVAILABLE else "❌ Unavailable (Install pyzbar)"
+    scan_status = "✅ Available" if PYZBAR_AVAILABLE else "❌ Unavailable (Contact bot owner)"
     
     welcome_message = (
         f"🔍 Welcome {user.first_name} to **ScanCraftBot**!\n\n"
@@ -250,7 +256,10 @@ async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not PYZBAR_AVAILABLE:
         await update.message.reply_text(
             "❌ **QR Scanning is currently unavailable**\n\n"
-            "The pyzbar library is not installed. Please contact the bot owner.",
+            "The pyzbar library is not installed. Please try:\n"
+            "• Contacting the bot owner\n"
+            "• Using the 'Generate QR Code' feature instead\n\n"
+            "QR generation is still working! 🎨",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -280,7 +289,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not PYZBAR_AVAILABLE:
             await query.edit_message_text(
                 "❌ **QR Scanning is currently unavailable**\n\n"
-                "The pyzbar library is not installed. Please contact the bot owner.",
+                "The pyzbar library is not installed. Please try:\n"
+                "• Contacting the bot owner\n"
+                "• Using the 'Generate QR Code' feature instead\n\n"
+                "QR generation is still working! 🎨",
                 parse_mode="Markdown",
                 reply_markup=get_main_keyboard()
             )
@@ -491,7 +503,10 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not PYZBAR_AVAILABLE:
         await update.message.reply_text(
             "❌ **QR Scanning is currently unavailable**\n\n"
-            "The pyzbar library is not installed. Please contact the bot owner.",
+            "The pyzbar library is not installed. Please try:\n"
+            "• Contacting the bot owner\n"
+            "• Using the 'Generate QR Code' feature instead\n\n"
+            "QR generation is still working! 🎨",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -639,8 +654,10 @@ def main():
     print("=" * 50)
     print("🔍 Starting ScanCraftBot...")
     print(f"📱 QR Scanning: {'✅ Available' if PYZBAR_AVAILABLE else '❌ Unavailable'}")
+    print(f"🐍 Python version: {sys.version}")
     if not PYZBAR_AVAILABLE:
-        print("⚠️ Install zbar: apt-get install zbar-tools libzbar-dev")
+        print("⚠️ To enable QR scanning, install: apt-get install zbar-tools libzbar-dev")
+        print("⚠️ Then restart the bot")
     print("=" * 50)
     
     # Build application
