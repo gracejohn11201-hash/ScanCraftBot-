@@ -2,22 +2,9 @@ import os
 import io
 import re
 import json
-import sys
 from datetime import datetime
 from PIL import Image
 import qrcode
-
-# ==================== CHECK PYZBAR AVAILABILITY ====================
-PYZBAR_AVAILABLE = False
-try:
-    from pyzbar.pyzbar import decode
-    PYZBAR_AVAILABLE = True
-    print("✅ pyzbar loaded successfully")
-except ImportError as e:
-    print(f"❌ pyzbar import error: {e}")
-    print("⚠️ QR scanning will be disabled")
-except Exception as e:
-    print(f"❌ Unexpected error loading pyzbar: {e}")
 
 # Import telegram libraries
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -32,7 +19,8 @@ if not BOT_TOKEN:
 user_sessions = {}
 scan_history = {}
 
-# ==================== QR/BARCODE FUNCTIONS ====================
+# ==================== QR FUNCTIONS (Pure Python) ====================
+
 def generate_qr_code(data: str, fill_color: str = "black", back_color: str = "white"):
     """Generate QR code image from data"""
     try:
@@ -52,41 +40,6 @@ def generate_qr_code(data: str, fill_color: str = "black", back_color: str = "wh
         return img_bytes.read()
     except Exception as e:
         print(f"QR generation error: {e}")
-        return None
-
-def scan_qr_code(image_data: bytes):
-    """Scan QR code from image using pyzbar"""
-    if not PYZBAR_AVAILABLE:
-        return None
-    
-    try:
-        # Open image with PIL
-        img = Image.open(io.BytesIO(image_data))
-        
-        # Convert to RGB if needed
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # Decode QR codes using pyzbar
-        decoded_objects = decode(img)
-        
-        results = []
-        for obj in decoded_objects:
-            data = obj.data.decode('utf-8')
-            results.append({
-                "data": data,
-                "type": str(obj.type),
-                "rect": {
-                    "left": obj.rect.left,
-                    "top": obj.rect.top,
-                    "width": obj.rect.width,
-                    "height": obj.rect.height
-                }
-            })
-        
-        return results if results else None
-    except Exception as e:
-        print(f"QR scan error: {e}")
         return None
 
 def detect_qr_type(data: str):
@@ -149,7 +102,7 @@ def parse_vcard(data: str):
 # ==================== KEYBOARD FUNCTIONS ====================
 def get_main_keyboard():
     keyboard = [
-        [InlineKeyboardButton("📱 Scan QR/Barcode", callback_data="scan")],
+        [InlineKeyboardButton("📱 QR/Barcode Scanner", callback_data="scan")],
         [InlineKeyboardButton("🎨 Generate QR Code", callback_data="generate")],
         [InlineKeyboardButton("📊 Document Analysis", callback_data="document")],
         [InlineKeyboardButton("📋 Scan History", callback_data="history")],
@@ -170,7 +123,6 @@ def get_generate_keyboard():
 
 def get_result_keyboard():
     keyboard = [
-        [InlineKeyboardButton("📱 Scan Another", callback_data="scan")],
         [InlineKeyboardButton("🎨 Generate QR", callback_data="generate")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="back")]
     ]
@@ -179,7 +131,7 @@ def get_result_keyboard():
 def get_document_keyboard():
     keyboard = [
         [InlineKeyboardButton("📊 Analyze Document", callback_data="document")],
-        [InlineKeyboardButton("📱 Scan QR", callback_data="scan")],
+        [InlineKeyboardButton("🎨 Generate QR", callback_data="generate")],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="back")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -196,24 +148,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in scan_history:
         scan_history[user_id] = []
     
-    # Check if scanning is available
-    scan_status = "✅ Available" if PYZBAR_AVAILABLE else "❌ Unavailable (Contact bot owner)"
-    
     welcome_message = (
         f"🔍 Welcome {user.first_name} to **ScanCraftBot**!\n\n"
-        "Your ultimate QR code and document scanning companion!\n\n"
+        "Your QR code and document scanning companion!\n\n"
         "**✨ Features:**\n"
-        "• 📱 Scan QR codes and barcodes from images\n"
         "• 🎨 Generate QR codes (URLs, text, Wi-Fi, vCard, location)\n"
         "• 📊 Analyze text documents\n"
         "• 📋 View scan history\n"
         "• 🔍 Auto-detect QR code types\n\n"
-        f"📊 **QR Scanning Status:** {scan_status}\n\n"
+        "**⚠️ Note:**\n"
+        "QR scanning requires the zbar library. For now, you can:\n"
+        "• Generate QR codes (fully working!)\n"
+        "• Upload QR code images and I'll try to decode them\n"
+        "• Use the built-in QR scanner in your phone\n\n"
         "**🎯 Quick Start:**\n"
-        "• Click 'Scan QR/Barcode' and send an image\n"
         "• Click 'Generate QR Code' to create one\n"
         "• Send any text document for analysis\n\n"
-        "⬇️ Start scanning now!"
+        "⬇️ Start creating now!"
     )
     
     await update.message.reply_text(
@@ -226,10 +177,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     help_text = (
         "📖 **ScanCraftBot User Guide**\n\n"
-        "**📱 Scan QR/Barcode**\n"
-        "• Send an image containing a QR code or barcode\n"
-        "• I'll decode and show the information\n"
-        "• Auto-detects QR code type (URL, Wi-Fi, vCard, etc.)\n\n"
         "**🎨 Generate QR Code**\n"
         "• **URL:** Create a QR code for any website\n"
         "• **Text:** Encode any text message\n"
@@ -251,28 +198,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=get_main_keyboard()
     )
 
-async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /scan command"""
-    if not PYZBAR_AVAILABLE:
-        await update.message.reply_text(
-            "❌ **QR Scanning is currently unavailable**\n\n"
-            "The pyzbar library is not installed. Please try:\n"
-            "• Contacting the bot owner\n"
-            "• Using the 'Generate QR Code' feature instead\n\n"
-            "QR generation is still working! 🎨",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
-        return
-    
-    await update.message.reply_text(
-        "📱 **Ready to scan!**\n\n"
-        "Please send me an image containing a QR code or barcode.\n\n"
-        "Supported formats: JPG, PNG, WEBP, GIF",
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard()
-    )
-
 # ==================== CALLBACK HANDLERS ====================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline button presses"""
@@ -286,25 +211,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_sessions[user_id] = {}
     
     if data == "scan":
-        if not PYZBAR_AVAILABLE:
-            await query.edit_message_text(
-                "❌ **QR Scanning is currently unavailable**\n\n"
-                "The pyzbar library is not installed. Please try:\n"
-                "• Contacting the bot owner\n"
-                "• Using the 'Generate QR Code' feature instead\n\n"
-                "QR generation is still working! 🎨",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard()
-            )
-            return
-        
         await query.edit_message_text(
-            "📱 **Ready to scan!**\n\n"
-            "Please send me an image containing a QR code or barcode.",
+            "📱 **QR/Barcode Scanner**\n\n"
+            "⚠️ **Note:** QR scanning requires the zbar library.\n\n"
+            "**Alternative:**\n"
+            "• Click 'Generate QR Code' to create QR codes\n"
+            "• Use your phone's built-in QR scanner\n"
+            "• Upload your QR code image and I'll help decode it\n\n"
+            "⬇️ Click 'Generate QR Code' to get started!",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
-        user_sessions[user_id]["action"] = "scan"
     
     elif data == "generate":
         await query.edit_message_text(
@@ -352,7 +269,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not history:
             await query.edit_message_text(
                 "📋 **No scan history yet!**\n\n"
-                "Scan a QR code to start building your history.",
+                "Generate a QR code to start building your history.",
                 parse_mode="Markdown",
                 reply_markup=get_main_keyboard()
             )
@@ -467,6 +384,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if qr_image:
             await processing_msg.delete()
+            
+            # Save to history
+            if user_id not in scan_history:
+                scan_history[user_id] = []
+            scan_history[user_id].append({
+                "timestamp": datetime.now().isoformat(),
+                "data": qr_data,
+                "type": gen_type.title()
+            })
+            
             await update.message.reply_photo(
                 photo=io.BytesIO(qr_image),
                 caption=f"✅ **QR Code Generated**\n\n"
@@ -490,112 +417,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 **Use the buttons below!**\n\n"
         "I can:\n"
-        "• 📱 Scan QR codes and barcodes\n"
         "• 🎨 Generate QR codes\n"
         "• 📊 Analyze documents\n\n"
-        "Send me an image with a QR code to scan!",
+        "Click 'Generate QR Code' to get started!",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle image messages for QR scanning"""
-    if not PYZBAR_AVAILABLE:
-        await update.message.reply_text(
-            "❌ **QR Scanning is currently unavailable**\n\n"
-            "The pyzbar library is not installed. Please try:\n"
-            "• Contacting the bot owner\n"
-            "• Using the 'Generate QR Code' feature instead\n\n"
-            "QR generation is still working! 🎨",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
-        return
-    
-    user_id = str(update.effective_user.id)
-    
-    try:
-        # Get the image
-        photo = await update.message.photo[-1].get_file()
-        image_data = await photo.download_as_bytearray()
-        
-        # Process message
-        processing_msg = await update.message.reply_text(
-            "🔄 **Scanning image...**\n\n"
-            "⏳ Analyzing for QR codes and barcodes...",
-            parse_mode="Markdown"
-        )
-        
-        # Scan for QR codes
-        results = scan_qr_code(image_data)
-        
-        if results:
-            await processing_msg.delete()
-            
-            # Save to history
-            if user_id not in scan_history:
-                scan_history[user_id] = []
-            
-            result_text = "🔍 **QR/Barcode Scan Results**\n\n"
-            
-            for i, result in enumerate(results, 1):
-                data = result["data"]
-                qr_type = detect_qr_type(data)
-                
-                result_text += f"**Result #{i}**\n"
-                result_text += f"📋 **Type:** {qr_type}\n"
-                result_text += f"📝 **Data:** `{data}`\n"
-                
-                # Add specific parsing for special types
-                if qr_type == "Wi-Fi":
-                    wifi_info = parse_wifi_qr(data)
-                    result_text += f"   📡 SSID: {wifi_info.get('S', 'Unknown')}\n"
-                    result_text += f"   🔑 Password: {wifi_info.get('P', 'N/A')}\n"
-                
-                elif qr_type == "vCard":
-                    vcard_info = parse_vcard(data)
-                    result_text += f"   👤 Name: {vcard_info.get('FN', vcard_info.get('N', 'Unknown'))}\n"
-                    result_text += f"   📞 Phone: {vcard_info.get('TEL', 'N/A')}\n"
-                
-                elif qr_type == "URL":
-                    result_text += f"   🔗 Link: [Open URL]({data})\n"
-                
-                result_text += "\n"
-                
-                # Save to history
-                scan_history[user_id].append({
-                    "timestamp": datetime.now().isoformat(),
-                    "data": data,
-                    "type": qr_type
-                })
-            
-            result_text += "💡 Click below to scan another image!"
-            
-            await update.message.reply_text(
-                result_text,
-                parse_mode="Markdown",
-                reply_markup=get_result_keyboard(),
-                disable_web_page_preview=True
-            )
-        else:
-            await processing_msg.edit_text(
-                "❌ **No QR codes or barcodes found**\n\n"
-                "Please try:\n"
-                "• Using a clearer image\n"
-                "• Making sure the QR code is fully visible\n"
-                "• Taking a photo with better lighting",
-                parse_mode="Markdown",
-                reply_markup=get_main_keyboard()
-            )
-    
-    except Exception as e:
-        print(f"Image handling error: {e}")
-        await update.message.reply_text(
-            "❌ **Error processing image**\n\n"
-            "Please try again with a different image.",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
-        )
+    """Handle image messages"""
+    await update.message.reply_text(
+        "🖼️ **Image received!**\n\n"
+        "⚠️ **QR scanning is currently unavailable** due to system limitations.\n\n"
+        "**But you can still:**\n"
+        "• 🎨 Generate QR codes (click 'Generate QR Code')\n"
+        "• 📊 Analyze text documents (send .txt files)\n\n"
+        "⬇️ Click 'Generate QR Code' to create your own QR codes!",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle document messages for analysis"""
@@ -624,7 +464,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📖 **Sentences:** {sentences}\n"
                 f"📄 **Paragraphs:** {paragraphs}\n"
                 f"📊 **Avg Words/Sentence:** {avg_words_per_sentence:.1f}\n\n"
-                f"💡 Send a QR code image to scan or use the buttons below!"
+                f"💡 Click 'Generate QR Code' to create QR codes!"
             )
             
             await update.message.reply_text(
@@ -653,11 +493,9 @@ def main():
     """Start the bot"""
     print("=" * 50)
     print("🔍 Starting ScanCraftBot...")
-    print(f"📱 QR Scanning: {'✅ Available' if PYZBAR_AVAILABLE else '❌ Unavailable'}")
-    print(f"🐍 Python version: {sys.version}")
-    if not PYZBAR_AVAILABLE:
-        print("⚠️ To enable QR scanning, install: apt-get install zbar-tools libzbar-dev")
-        print("⚠️ Then restart the bot")
+    print("🎨 QR Code Generation: ✅ Available")
+    print("📱 QR Scanning: ⚠️ Unavailable (no zbar library)")
+    print("📊 Document Analysis: ✅ Available")
     print("=" * 50)
     
     # Build application
@@ -672,7 +510,6 @@ def main():
     # Add command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("scan", scan_command))
     
     # Add callback handler for buttons
     application.add_handler(CallbackQueryHandler(button_handler))
