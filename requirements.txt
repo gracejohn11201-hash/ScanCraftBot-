@@ -1,5 +1,4 @@
 python-telegram-bot==21.10
 Pillow==11.1.0
 qrcode==7.4.2
-pyzbar==0.1.9
 python-dotenv==1.0.1
