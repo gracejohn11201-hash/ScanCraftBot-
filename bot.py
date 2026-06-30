@@ -6,7 +6,9 @@ import asyncio
 from datetime import datetime
 from PIL import Image
 import qrcode
-from qreader import QReader
+import cv2
+import numpy as np
+from pyzbar.pyzbar import decode
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -14,9 +16,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set!")
-
-# Initialize QR reader
-qr_reader = QReader()
 
 # User sessions
 user_sessions = {}
@@ -45,22 +44,33 @@ def generate_qr_code(data: str, fill_color: str = "black", back_color: str = "wh
         return None
 
 def scan_qr_code(image_data: bytes):
-    """Scan QR code from image using qreader"""
+    """Scan QR code from image using OpenCV + pyzbar"""
     try:
-        img = Image.open(io.BytesIO(image_data))
-        # Convert to RGB if needed
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
+        # Convert bytes to numpy array
+        nparr = np.frombuffer(image_data, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
-        # Detect QR code
-        decoded_text = qr_reader.detect_and_decode(image=img)
+        if img is None:
+            return None
         
-        if decoded_text:
-            return [{
-                "data": decoded_text,
-                "type": "QRCODE"
-            }]
-        return None
+        # Decode QR codes
+        decoded_objects = decode(img)
+        
+        results = []
+        for obj in decoded_objects:
+            data = obj.data.decode('utf-8')
+            results.append({
+                "data": data,
+                "type": obj.type,
+                "rect": {
+                    "left": obj.rect.left,
+                    "top": obj.rect.top,
+                    "width": obj.rect.width,
+                    "height": obj.rect.height
+                }
+            })
+        
+        return results if results else None
     except Exception as e:
         print(f"QR scan error: {e}")
         return None
@@ -110,7 +120,7 @@ def parse_wifi_qr(data: str):
     for part in data.split(';'):
         if ':' in part:
             key, value = part.split(':', 1)
-            parts[key] = value
+            parts[key.strip()] = value.strip()
     return parts
 
 def parse_vcard(data: str):
@@ -119,7 +129,7 @@ def parse_vcard(data: str):
     for line in data.split('\n'):
         if ':' in line:
             key, value = line.split(':', 1)
-            vcard[key] = value
+            vcard[key.strip()] = value.strip()
     return vcard
 
 # ==================== KEYBOARD FUNCTIONS ====================
@@ -152,6 +162,14 @@ def get_result_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def get_document_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("📊 Analyze Document", callback_data="document")],
+        [InlineKeyboardButton("📱 Scan QR", callback_data="scan")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="back")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # ==================== COMMAND HANDLERS ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
@@ -172,7 +190,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 🎨 Generate QR codes (URLs, text, Wi-Fi, vCard, location)\n"
         "• 📊 Analyze text documents\n"
         "• 📋 View scan history\n"
-        "• 🔍 Detect QR code types (URL, Wi-Fi, vCard, etc.)\n\n"
+        "• 🔍 Auto-detect QR code types\n\n"
         "**🎯 Quick Start:**\n"
         "• Click 'Scan QR/Barcode' and send an image\n"
         "• Click 'Generate QR Code' to create one\n"
@@ -193,17 +211,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**📱 Scan QR/Barcode**\n"
         "• Send an image containing a QR code or barcode\n"
         "• I'll decode and show the information\n"
-        "• Auto-detects QR code type\n\n"
+        "• Auto-detects QR code type (URL, Wi-Fi, vCard, etc.)\n\n"
         "**🎨 Generate QR Code**\n"
-        "• URL: Create a QR code for any website\n"
-        "• Text: Encode any text message\n"
-        "• Wi-Fi: Create Wi-Fi login QR codes\n"
-        "• vCard: Create contact QR codes\n"
-        "• Location: Create geo-location QR codes\n\n"
+        "• **URL:** Create a QR code for any website\n"
+        "• **Text:** Encode any text message\n"
+        "• **Wi-Fi:** Create Wi-Fi login QR codes\n"
+        "• **vCard:** Create contact QR codes\n"
+        "• **Location:** Create geo-location QR codes\n\n"
         "**📊 Document Analysis**\n"
         "• Send text documents (.txt)\n"
         "• Get word count, character count\n"
-        "• Readability analysis\n\n"
+        "• Sentence and paragraph analysis\n\n"
         "**Commands**\n"
         "/start - Start the bot\n"
         "/help - Show this help"
@@ -321,7 +339,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
-        user_sessions[user_id]["action"] = None
+        user_sessions[user_id] = {}
 
 # ==================== MESSAGE HANDLERS ====================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -342,11 +360,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not text.startswith(('http://', 'https://')):
                 text = f"https://{text}"
             qr_data = text
-            display_name = f"URL: {text}"
+            display_name = f"URL: {text[:40]}{'...' if len(text) > 40 else ''}"
         
         elif gen_type == "text":
             qr_data = text
-            display_name = f"Text: {text[:30]}..."
+            display_name = f"Text: {text[:40]}{'...' if len(text) > 40 else ''}"
         
         elif gen_type == "wifi":
             # Parse Wi-Fi details
@@ -398,9 +416,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Generate QR code
+        processing_msg = await update.message.reply_text(
+            "🔄 **Generating QR code...**",
+            parse_mode="Markdown"
+        )
+        
         qr_image = generate_qr_code(qr_data)
         
         if qr_image:
+            await processing_msg.delete()
             await update.message.reply_photo(
                 photo=io.BytesIO(qr_image),
                 caption=f"✅ **QR Code Generated**\n\n"
@@ -412,7 +436,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             user_sessions[user_id]["action"] = None
         else:
-            await update.message.reply_text(
+            await processing_msg.edit_text(
                 "❌ **Failed to generate QR code**\n\n"
                 "Please try again with different input.",
                 parse_mode="Markdown"
@@ -535,6 +559,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chars_no_space = len(re.sub(r'\s', '', text))
             sentences = len([s for s in re.split(r'[.!?]+', text) if s.strip()])
             paragraphs = len([p for p in text.split('\n') if p.strip()])
+            avg_words_per_sentence = words / sentences if sentences > 0 else 0
             
             analysis = (
                 f"📊 **Document Analysis**\n\n"
@@ -544,14 +569,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"   (Without spaces: {chars_no_space})\n"
                 f"📖 **Sentences:** {sentences}\n"
                 f"📄 **Paragraphs:** {paragraphs}\n"
-                f"📊 **Avg Words/Sentence:** {words/sentences if sentences > 0 else 0:.1f}\n\n"
+                f"📊 **Avg Words/Sentence:** {avg_words_per_sentence:.1f}\n\n"
                 f"💡 Send a QR code image to scan or use the buttons below!"
             )
             
             await update.message.reply_text(
                 analysis,
                 parse_mode="Markdown",
-                reply_markup=get_main_keyboard()
+                reply_markup=get_document_keyboard()
             )
         except Exception as e:
             print(f"Document error: {e}")
@@ -572,8 +597,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== MAIN FUNCTION ====================
 def main():
     """Start the bot"""
+    print("=" * 50)
     print("🔍 Starting ScanCraftBot...")
     print("📱 Ready to scan QR codes and barcodes!")
+    print("=" * 50)
     
     # Build application
     application = (
@@ -599,6 +626,7 @@ def main():
     
     # Start the bot
     print("✅ Bot is running! Press Ctrl+C to stop.")
+    print("=" * 50)
     application.run_polling()
 
 if __name__ == "__main__":
