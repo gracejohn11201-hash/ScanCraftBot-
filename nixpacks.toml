@@ -1,8 +1,11 @@
 [phases.setup]
-nixPkgs = ["python311", "zbar", "libzbar", "gcc", "libpng", "zlib"]
+nixPkgs = ["python311", "zbar", "libzbar", "zbar-dev", "gcc", "libpng", "zlib", "glibc"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = [
+    "pip install --upgrade pip",
+    "pip install -r requirements.txt"
+]
 
 [start]
 cmd = "python bot.py"
