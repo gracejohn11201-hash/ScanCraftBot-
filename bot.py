@@ -6,8 +6,6 @@ import asyncio
 from datetime import datetime
 from PIL import Image
 import qrcode
-import cv2
-import numpy as np
 from pyzbar.pyzbar import decode
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -44,16 +42,16 @@ def generate_qr_code(data: str, fill_color: str = "black", back_color: str = "wh
         return None
 
 def scan_qr_code(image_data: bytes):
-    """Scan QR code from image using OpenCV + pyzbar"""
+    """Scan QR code from image using Pillow + pyzbar"""
     try:
-        # Convert bytes to numpy array
-        nparr = np.frombuffer(image_data, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Open image with PIL
+        img = Image.open(io.BytesIO(image_data))
         
-        if img is None:
-            return None
+        # Convert to RGB if needed
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
         
-        # Decode QR codes
+        # Decode QR codes using pyzbar
         decoded_objects = decode(img)
         
         results = []
