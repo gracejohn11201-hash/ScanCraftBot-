@@ -3,11 +3,10 @@ import io
 import re
 import json
 import asyncio
-import base64
 from datetime import datetime
 from PIL import Image
 import qrcode
-from pyzbar.pyzbar import decode
+from qreader import QReader
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -15,6 +14,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set!")
+
+# Initialize QR reader
+qr_reader = QReader()
 
 # User sessions
 user_sessions = {}
@@ -43,24 +45,22 @@ def generate_qr_code(data: str, fill_color: str = "black", back_color: str = "wh
         return None
 
 def scan_qr_code(image_data: bytes):
-    """Scan QR code from image"""
+    """Scan QR code from image using qreader"""
     try:
         img = Image.open(io.BytesIO(image_data))
-        decoded = decode(img)
+        # Convert to RGB if needed
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
         
-        results = []
-        for obj in decoded:
-            results.append({
-                "data": obj.data.decode('utf-8'),
-                "type": obj.type,
-                "rect": {
-                    "left": obj.rect.left,
-                    "top": obj.rect.top,
-                    "width": obj.rect.width,
-                    "height": obj.rect.height
-                }
-            })
-        return results
+        # Detect QR code
+        decoded_text = qr_reader.detect_and_decode(image=img)
+        
+        if decoded_text:
+            return [{
+                "data": decoded_text,
+                "type": "QRCODE"
+            }]
+        return None
     except Exception as e:
         print(f"QR scan error: {e}")
         return None
@@ -203,8 +203,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**📊 Document Analysis**\n"
         "• Send text documents (.txt)\n"
         "• Get word count, character count\n"
-        "• Readability analysis\n"
-        "• Sentiment analysis\n\n"
+        "• Readability analysis\n\n"
         "**Commands**\n"
         "/start - Start the bot\n"
         "/help - Show this help"
@@ -281,8 +280,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "I'll provide:\n"
             "• Word and character count\n"
             "• Sentence and paragraph count\n"
-            "• Readability analysis\n"
-            "• Sentiment analysis\n\n"
+            "• Readability analysis\n\n"
             "Note: Maximum file size: 1MB",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
@@ -535,7 +533,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             words = len(re.findall(r'\b\w+\b', text))
             chars = len(text)
             chars_no_space = len(re.sub(r'\s', '', text))
-            sentences = len(re.split(r'[.!?]+', text))
             sentences = len([s for s in re.split(r'[.!?]+', text) if s.strip()])
             paragraphs = len([p for p in text.split('\n') if p.strip()])
             
