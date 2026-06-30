@@ -2,11 +2,18 @@ import os
 import io
 import re
 import json
-import asyncio
 from datetime import datetime
 from PIL import Image
 import qrcode
-from pyzbar.pyzbar import decode
+
+# Try to import pyzbar with fallback
+try:
+    from pyzbar.pyzbar import decode
+    PYZBAR_AVAILABLE = True
+except ImportError:
+    PYZBAR_AVAILABLE = False
+    print("⚠️ pyzbar not available - QR scanning disabled")
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -42,7 +49,10 @@ def generate_qr_code(data: str, fill_color: str = "black", back_color: str = "wh
         return None
 
 def scan_qr_code(image_data: bytes):
-    """Scan QR code from image using Pillow + pyzbar"""
+    """Scan QR code from image using pyzbar"""
+    if not PYZBAR_AVAILABLE:
+        return None
+    
     try:
         # Open image with PIL
         img = Image.open(io.BytesIO(image_data))
@@ -180,6 +190,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in scan_history:
         scan_history[user_id] = []
     
+    # Check if scanning is available
+    scan_status = "✅ Available" if PYZBAR_AVAILABLE else "❌ Unavailable (Install pyzbar)"
+    
     welcome_message = (
         f"🔍 Welcome {user.first_name} to **ScanCraftBot**!\n\n"
         "Your ultimate QR code and document scanning companion!\n\n"
@@ -189,6 +202,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 📊 Analyze text documents\n"
         "• 📋 View scan history\n"
         "• 🔍 Auto-detect QR code types\n\n"
+        f"📊 **QR Scanning Status:** {scan_status}\n\n"
         "**🎯 Quick Start:**\n"
         "• Click 'Scan QR/Barcode' and send an image\n"
         "• Click 'Generate QR Code' to create one\n"
@@ -233,6 +247,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def scan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /scan command"""
+    if not PYZBAR_AVAILABLE:
+        await update.message.reply_text(
+            "❌ **QR Scanning is currently unavailable**\n\n"
+            "The pyzbar library is not installed. Please contact the bot owner.",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
     await update.message.reply_text(
         "📱 **Ready to scan!**\n\n"
         "Please send me an image containing a QR code or barcode.\n\n"
@@ -254,6 +277,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_sessions[user_id] = {}
     
     if data == "scan":
+        if not PYZBAR_AVAILABLE:
+            await query.edit_message_text(
+                "❌ **QR Scanning is currently unavailable**\n\n"
+                "The pyzbar library is not installed. Please contact the bot owner.",
+                parse_mode="Markdown",
+                reply_markup=get_main_keyboard()
+            )
+            return
+        
         await query.edit_message_text(
             "📱 **Ready to scan!**\n\n"
             "Please send me an image containing a QR code or barcode.",
@@ -456,6 +488,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle image messages for QR scanning"""
+    if not PYZBAR_AVAILABLE:
+        await update.message.reply_text(
+            "❌ **QR Scanning is currently unavailable**\n\n"
+            "The pyzbar library is not installed. Please contact the bot owner.",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
     user_id = str(update.effective_user.id)
     
     try:
@@ -597,7 +638,9 @@ def main():
     """Start the bot"""
     print("=" * 50)
     print("🔍 Starting ScanCraftBot...")
-    print("📱 Ready to scan QR codes and barcodes!")
+    print(f"📱 QR Scanning: {'✅ Available' if PYZBAR_AVAILABLE else '❌ Unavailable'}")
+    if not PYZBAR_AVAILABLE:
+        print("⚠️ Install zbar: apt-get install zbar-tools libzbar-dev")
     print("=" * 50)
     
     # Build application
